@@ -1,0 +1,13 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.html
+*.pdf
+*.log
+NBA_Bubble/NBA_Bubble_cache/
+NBA_Bubble/NBA_Bubble_files/
+NBA_Bubble/NBA_Bubble.tex
+NBA_Bubble/agsm.bst
+
+

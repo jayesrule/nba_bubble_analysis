@@ -1,0 +1,342 @@
+---
+title: The NBA Bubble; Is it easier to shoot?
+
+# to produce blinded version set to 1
+blinded: 0
+
+authors: 
+- name: Jaylen Lee 
+  thanks: The author gratefully acknowledges Basketball Reference for being an incredibly well organized website. 
+  affiliation: Department of Statistics, University of California, Irvine
+
+
+keywords:
+- NBA
+- Basketball
+- Sports
+- Bayesian Analysis
+
+abstract: |
+  We analyze the effect of the unique NBA quarantine environment, termed the NBA Bubble, on players' jump shooting performance. Using a hierarchical logistic regression framework, we estimate that the odds of a player making a shot are 5% higher in the bubble than outside, comparing shots of similar distance and difficulty. Given the average number of shots an NBA player takes during a game, this increase in shooting performance is neglible in terms of impact on games. 
+
+bibliography: bibliography.bib
+output: 
+  rticles::asa_article:
+  includes:
+      in_header: template.tex
+  fig_width: 15
+  fig_height: 9
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, error = FALSE, cache = TRUE, message = FALSE)
+suppressPackageStartupMessages(library(tidyverse))
+library(lubridate)
+library(here)
+library(knitr)
+```
+
+# The NBA Bubble: Is it easier to shoot?
+Midway through the 2019-2020 National Basketball Association (NBA) season, on March 11, 2019, the league elected to suspend the season after one of the star players of the Utah Jazz, Rudy Gobert, tested positive for CODID-19 \citep{nbasus}. Three months later, the NBA approved a rather audacious plan to conclude the unfinished season: the continuation of the NBA season in a special quarantined zone inside Walt Disney World in Florida, termed the NBA bubble. Players from teams with realistic chances of making the playoffs, meaning 22 of the 30 current NBA teams, would be flown to the bubble and would be unable to leave, participating in daily mandatory testing for Covid-19. Players would play the final 8 games of the regular season over the course of the first two weeks of August before the immediate beginning of the playoffs for the top 8 teams from the league's two conferences. No people were allowed in the bubble other than players, coaches, and staff for each teams as well as the Disney staff. Players, coaches, and team staff were also confined to the bubble until their team were eliminated from playoff contention. As a result, the NBA games, which usually draws crowds of thousands of NBA fans, were played in empty Disney sports facilities.
+
+This approach proved effective as there were 0 recorded positive cases amongst players in the NBA bubble \citep{Oxner2020}. However, the artificial environment created by the bubble, most notably the lack of fans, lead some to question how well games played in the bubble approximate their pre-quarantine equivalents \citep{nbcsports}. There has been thought that the lack of fans as well as lack of travel make play easier, as players are less travel fatigued and under less pressure during games. This can cause some contention when comparing NBA championships across seasons \citep{Highkin2020}. The alleged easier conditions should result in the championship from this year given less weight and thus the eventual champions should be given less credit for winning the less rigorous bubble championship when comparing to championships in the past \citep{undisp}. The goal of this analysis is not to quantify which championships were easier compared to others. However, amidst the discussion of weighting championships an interesting hypothesis is considered: the unique environment of the bubble makes it easier to score than ever, specifically when shooting jump shots, the typical ranged attempt of scoring in the NBA. A jump shot is a shot with one or both hands in which a player leaps into the air and shoots the ball at the basket at the moment of reaching the highest point of the leap. This is typically performed at a range greater than 10 feet from the basket. One possible explanation for this hypothesis is that the lack of fans remove much of the pressure and stress associated with playing the game directly in front of thousands of loud spectators. Another possible explanation is that playing in an effectively empty gym more closely simulates how players practice, leading to improved performance. 
+
+The goal of this analysis is to see if the there is indeed a "bubble effect" on shooting performance. We do this by testing the following null hypothesis: The probability of success on a jump shot is not improved by being shot during the bubble period. 
+
+# The Data
+
+```{r}
+#Loading data created in data/Creating_dataset.Rmd
+load(here("data/shot_data.RData"))
+```
+
+We have data from `r length(unique(shotsData$namePlayer))` players who have attempted jump shots for the `r length(unique(shotsData$nameTeam))` bubble teams for the 2019-2020 NBA seasons. 
+
+```{r shot_data}
+shotsData %>% 
+  group_by(bubble) %>% 
+  summarise(jump_shot_pct = mean(made_shot), 
+            num_shots = n(), 
+            .groups = "keep") %>% 
+  mutate(bubble = ifelse(bubble == 1, "bubble", "pre-bubble")) %>% 
+  kable(digits = 3,  caption = "Jump shot percentage before and during the bubble", format = "latex")
+```
+
+
+Table \ref{tab:shot_data} is the table of all the shots compiled during the NBA 2019-2020 season. Marginally we see that there is large difference in shots between the two period, with less shots taken after the bubble. This makes sense due to the number of games being played during the bubble is much less than the number of games during the regular season. We also see a slight increase in fg% comparing pre-bubble and bubble periods. We drill down on a player level by looking at the trajectory of a player's fg% in Figure \ref{fig:fg_by_date}. We selected 10 random players who attempt on average more than 6 shots a game and looked at their fg% trajectories by date. We see that after the long hiatus players did not immediately improve nor worsen their accuracy (given by the relative flatness of the slopes during the hiatus). However it is interesting to note some rather dramatic changes in certain players' accuracy like Danillo Gallinari and Eric Gordon approximately 2 weeks into the NBA restart. Looking further into the sudden spikes of improvement or worsening revealed that these were likely to be caused by recovering from an injury or getting injured in the worsening performance cases. This is not the effect of interest. 
+
+```{r fg_by_date, fig.cap="10 randomly selected players and their field goal percentage over time. Smoothers are based on a 10 day rolling average", fig.align='center'}
+#Creating longitudinal plot of player jump shot performance
+
+#Creating a list of players who average more than 6 shots a game
+volume_shooters <- shotsData %>% 
+  group_by(namePlayer) %>% #Grouping by player name
+  group_by(dateGame, .add = TRUE) %>% #Group by date
+  summarise(n = n(), .groups = "keep") %>%
+  group_by(namePlayer) %>%
+  summarise(avg_shots = mean(n), .groups = "keep") %>%
+  filter(avg_shots > 6)
+
+#Number of players to sample for display
+n_players <- 10
+
+#Creating dataset and plot parameters
+pct_shot_chart <- shotsData %>% 
+  filter(namePlayer %in% sample(volume_shooters$namePlayer,n_players)) %>% #Sampling n_players players
+  group_by(namePlayer) %>% #Grouping by player name
+  group_by(dateGame, .add = TRUE) %>% #Group by date
+  summarise(fg_pct = mean(made_shot), .groups = "keep") %>% #Calculating fg% on jump shots
+  ggplot(aes(x = dateGame, y = fg_pct, group = namePlayer)) #creating ggplot setup
+
+
+#Plotting
+pct_shot_chart+
+  geom_point(alpha = 0.2, aes(x = dateGame, y = fg_pct, color = namePlayer)) +
+  geom_line(aes(y = zoo::rollmean(fg_pct,14, na.pad = T), #rolling average of 10 days for fg%
+                color = namePlayer))+
+  ggtitle(paste0("Player fg% by Date (",n_players," displayed)"))+
+  xlab("Game Date")+
+  ylab("fg%")
+```
+
+We also looked at field goal percentage by the area on the court in which the jump shot was performed. Figure \ref{fig:bubble_areas} shows the fg% of shots taken after the NBA bubble while Figure \ref{fig:non_bubble_areas} shows similar information but prior to the NBA bubble. The pattern remains the same although Figure \ref{fig:bubble_areas} shows a much noisier vision due to only having a fourth of the number of shots considered as compared to Figure \ref{fig:non_bubble_areas}. What is interesting to note is the relatively low fg% immediately next to the basket, especially compared to a few feet further removed from the basket. This is because we are only considering jump shots, when usually lay-ups or dunks are performed within that range of the basket.
+
+```{r non_bubble_areas, fig.cap= "Shot percentage by location before the NBA restart", fig.align='center'}
+library(grid)
+library(jpeg)
+ 
+# half court image
+courtImg.URL <- "https://thedatagame.files.wordpress.com/2016/03/nba_court.jpg"
+court <- rasterGrob(readJPEG(RCurl::getURLContent(courtImg.URL)),
+           width=unit(1,"npc"), height=unit(1,"npc"))
+  
+ggplot(filter(shotsData, bubble == 0 ), aes(x=locationX, y=locationY, z = 1*isShotMade)) + 
+    annotation_custom(court, -250, 250, -52, 418) +
+  stat_summary_hex(fun = mean, bins = 15, alpha = 0.7) +
+    scale_fill_gradientn(name = "fg%", colours = c("blue","yellow","red")) +
+    xlim(250, -250) +
+    ylim(-5, 418) +
+    coord_fixed() +
+    ggtitle("Pre-Bubble FG% By Area") +
+    theme(line = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank())
+   
+
+```
+
+```{r, bubble_areas,fig.cap= "Shot percentage by location after the NBA restart", fig.align='center'}
+library(grid)
+library(jpeg)
+ 
+# half court image
+courtImg.URL <- "https://thedatagame.files.wordpress.com/2016/03/nba_court.jpg"
+court <- rasterGrob(readJPEG(RCurl::getURLContent(courtImg.URL)),
+           width=unit(1,"npc"), height=unit(1,"npc"))
+  
+ggplot(filter(shotsData, bubble == 1 ), aes(x=locationX, y=locationY, z = 1*isShotMade)) + 
+    annotation_custom(court, -250, 250, -52, 418) +
+  stat_summary_hex(fun = mean, bins = 15, alpha = 0.7) +
+    scale_fill_gradientn(name = "fg%", colours = c("blue","yellow","red")) +
+    xlim(250, -250) +
+    ylim(-5, 418) +
+    coord_fixed() +
+    ggtitle("Bubble FG% By Area") +
+    theme(line = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank())
+   
+
+```
+
+
+## Removal considerations
+
+We will remove data from player who did not attempt 10 jump shots in either of the pre-bubble or bubble periods. This is for so that we have adequate information on each player's unique shooting ability. 
+
+```{r}
+load(here("data_wrangling/modeling_data.RData"))
+```
+
+# Model
+
+Let be $y_{ij}$ is 1 if the $j^{th}$ jump shot by the $i^{th}$ player is made and 0 otherwise. We propose a hierarchical logistic regression model:
+
+$$y_{ij} \sim Bern(\theta_{ij})$$
+where $\theta_{ij}$ is the probability of $j^{th}$ jump shot by the $i^{th}$ player's success. We then model $\theta_ij$ in Equation \ref{model} : 
+
+\begin{equation}
+logit(\theta_{ij}) = b_i + \beta_0 + \beta_1 (bubble_j) + \beta_2 (shotDistance_j) + \beta_3 (thrpt_j) + \beta_4 (oppDefRate_j)
+\label{model}
+\end{equation}
+
+where the explanatory variables are in Table \ref{key}. We allow individual slopes on the log-odds scale to capture within player correlation, where $e^{b_i}$ is the odds ratio for making a shot for player i compared to a similar shot type from an average NBA player. We do this to account for individual differences in ability to make a jump shot. 
+
+\begin{table}
+\centering
+\begin{tabular}{ll}
+\textbf{ Variable } & \textbf{ Def }                                                  \\
+$bubble$          & binary: shot attempted in the bubble                            \\
+$shotDistance$    & num: distance from the goal (ft)                                \\
+$thrpt$           & binary: whether the attempted shot was a three pointer or not   \\
+$oppDefRate$      & num: the opponent's defensive rating (pts per 100 possessions) 
+\end{tabular}
+
+\caption{Key for the covariates considered in Equation \ref{model}}
+\label{key}
+
+\end{table}
+
+
+We adopt a fully bayesian set up and now specify prior distributions for all parameters. 
+
+## Prior distributions
+
+Apriori we expect individual propensity toward making a shot to vary from league average.  But a $b_i = 10$, corresponding to an individuals relative odds of making a shot being `r exp(10)` higher than league average is obviously ridiculous. So the prior for $b_i$ is constrained to give an expected relative difference in odds of making between 25% and 385% of league average in the middle 50% of individual effects. This more concentrated prior also serves as a means for maintaining posterior convergence in the model. Otherwise we give diffuse priors with slightly shifted priors for $\beta_2$, $\beta_3$, $\beta_4$. We believe apriori that further distance shots, three pointers, and better defended shots will be harder to make. We present all priors in Table \ref{priors}.
+
+\begin{table}
+\centering
+\begin{tabular}{ll}
+\textbf{ Parameter } & \textbf{ Prior }  \\
+ $b_i$      & N(0,2)          \\
+ $\beta_0$  & N(0,10)         \\
+ $\beta_1$  & N(0,10)         \\
+ $\beta_2$  & N(-1,10)        \\
+ $\beta_3$  & N(-1,10)        \\
+ $\beta_4$  & N(-1,10)       
+\end{tabular}
+\caption{Prior distributions for the covariates of interest.}
+\label{priors}
+\end{table}
+
+# Results
+
+We fit the model using STAN \citep{Carpenter2017}. We ran 4000 MCMC draws after 4000 burn-in draws. Posterior convergence diagnostics were assessed and are available in the appendix. 
+
+```{r}
+y <- modeling_data$made_shot
+X <- as.matrix(select(modeling_data, -made_shot, -player_id))
+id <- modeling_data$player_id
+
+N <- length(y)
+D <- ncol(X)
+J <- length(unique(id))
+
+stan_data <- list(y = y,
+                  X = X,
+                  id = id,
+                  N = N,
+                  D = D,
+                  J = J)
+
+library(rstan)
+
+#uncomment following lines to run the model
+#model <- stan(here("nba_stan.stan"), data = stan_data, cores = ceiling(0.75*parallel::detectCores()))
+#save(model, file = here("mcmc_draws.RData"))
+
+```
+
+
+
+
+
+
+
+```{r}
+library(ggmcmc) #package for easy mcmc visualization
+
+#Loading in the MCMC draws
+load(here("mcmc_draws.RData"))
+
+#Preparing for visualization
+S <- ggs(model)
+
+#Compiling posterior summaries
+model_results = round(exp(summary(model)$summary[1:4,c(1,4,8)]),2)
+
+```
+
+
+```{r beta_sum, fig.cap="Posterior summary of the coefficients of bubble, shotDistance, thrpt, and oppDefRate respectively.", fig.align='center' }
+
+#Plotting posterior densities
+ggs_density(S,family = "beta", greek = TRUE)
+```
+
+
+
+```{r model_sum}
+#Printing posterior summaries
+kable(model_results, format = "latex", caption = "Posterior summaries of the exponentiated coefficients")
+```
+
+
+Figure \ref{fig:beta_sum} gives a visual representation of the posterior distributions for each of the coefficients of interest.  Posterior summaries for the exponentiated coefficients are in Table \ref{tab:model_sum}. Comparing two random players of similar skill shooting jump shots from similar distances against similar defenses, we estimate the relative odds of making a jump shot in the bubble is `r model_results[1,1]` (95% CI: `r model_results[1,2]`, `r model_results[1,3]`) times that of the odds of making a jump shot outside of the bubble. 
+
+
+We conduct the following formally stated hypothesis test. We compare against `r round(log(1.01),2)` as that is associated with a 1% relative increase in the odds of making a shot in the bubble comparing similar shots against similar defenses.  
+
+$H_0: \beta_1 < `r round(log(1.01),2)`$
+
+$H_a: \beta_1 \ge `r round(log(1.01),2)`$
+
+```{r}
+#extracting mcmc draws for beta
+mcmc_draws <- extract(model)
+mcmc_draws <- mcmc_draws$beta
+```
+
+
+Based of our posterior calculations $P(\beta_1 < log(1.01) | y) =  `r mean(mcmc_draws[,1] < log(1.01))`$. We will reject the null hypothesis and conclude that there is a statistically significant relative increase in the odds of making a shot comparing similar shots against similar defenses.
+
+# Conclusions
+
+We showed that shots in the bubble were associated with an estimated 5% increase in odds of success compared to shots outside the bubble. The effect is slight. On the probability scale, if a player shoots 30% outside the bubble, we expect that same player to shoot 31% within the bubble. Given the amounts of shots most players get (~5 a game), we do not expect this to effect the outcome of any game in any way. 
+
+
+What is most surprising is the effects of a shot being a 3 pointer and opponent defensive rating. Apriori I figured 3 point shots would be harder to make, similar for shots against good defensive teams. To find the opposite result is surprising.  
+
+In further steps I would like to conduct sub-analysis by player age. Essentially, I would expect younger players to improve from the 3 month hiatus as young players typically improve rapidly during off-seasons while older players typically maintain their productivity. I would like to see if that effect is what the bubble variable is really picking up. Additionally I would like to account for further 
+
+# Appendix
+
+## MCMC Diagnostics
+
+
+
+
+### Traceplots
+```{r traceplot, fig.cap = "Trace plots indicate good mixing of the parameters of interests.", fig.align='center'}
+ggs_traceplot(S, family = "beta")
+```
+
+
+### Autocorrelation
+
+```{r autocor, fig.cap= "Auto correlation between successive MCMC draws dies off quickly.", fig.align='center'}
+ggs_autocorrelation(S, family = "beta")
+```
+
+
+### Gelman's R
+
+```{r gelR, fig.cap = "Convergence diagnostics are sufficient for every parameter except for the individual slopes of two players." , fig.align='center'}
+rhat <- summary(model)$summary[,'Rhat']
+
+rhat <- tibble(par = names(rhat), gelR = rhat, inds = 1:length(rhat))
+
+ggplot(rhat, aes(inds,gelR))+
+  geom_point()+
+  geom_text(aes(label = ifelse(gelR > 1.1, par, "")),
+            nudge_x = 7,
+            nudge_y = 0.002)+
+  geom_hline(yintercept = 1.1, color = "red", show.legend = TRUE)+
+  ggtitle("Gelman's R")
+
+
+```

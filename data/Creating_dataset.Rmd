@@ -1,0 +1,117 @@
+---
+title: "Creating the Dataset"
+author: "Jaylen Lee"
+date: "10/8/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+suppressPackageStartupMessages(library(tidyverse))
+library(lubridate)
+```
+
+#Loading in nbastatR
+In order to investigate the effects of the bubble environment on shooting, I need to create the appropriate dataset. The nbastatR package by Alex Bresler makes this pretty straightforward. 
+
+```{r}
+#If you wanted to install the package you can do so with the following command
+
+#devtools::install_github("abresler/nbastatR") #uncomment to install
+
+#Loading the package
+library(nbastatR)
+```
+
+Next we need to generate a list of all NBA teams and then exclude the teams that were not invited to the bubble. 
+
+```{r}
+#Creating the list of non bubble teams
+non_bubble_teams = c("Charlotte Hornets", "Chicago Bulls","New York Knicks",
+                     "Detroit Pistons", "Atlanta Hawks", "Cleveland Cavaliers",
+                     "Golden State Warriors", "Minnesota Timberwolves")
+
+#Loading the list of teams
+current_teams <- nba_teams() %>%
+  filter(isNonNBATeam==0) %>%
+  mutate(nameTeam = ifelse(nameTeam == "Los Angeles Clippers", "LA Clippers", nameTeam ))
+
+bubble_teams <- current_teams %>%
+  filter(!(nameTeam %in% non_bubble_teams))
+```
+
+
+What would also be nice is to have some measure of the defensive strength that is being played against the player. A crude measure is the opponent's defensive rating which basketball reference calculates as the average number of points allowed per 100 possessions. Unfortunately, nbastatR's basketball reference pulling isn't working so I need to try web scraping myself. 
+
+```{r}
+#Loading in package for webscraping
+library(rvest)
+
+#Opening webpage
+br_url <- read_html("https://www.basketball-reference.com/leagues/NBA_2020_ratings.html")
+
+#Grabbing table
+team_ratings <- br_url %>% html_nodes("table") %>% html_table(header = T)
+
+#Formatting
+team_ratings <-  team_ratings[[1]] #Extracting just the data frame
+
+#Turning first row into a header
+names(team_ratings) <- as.character(unlist(team_ratings[1,]))
+team_ratings <- team_ratings[-1,]
+
+#Grabbing the columns of interest: Team name and defensive rating
+team_ratings <- team_ratings[,c("Team","DRtg")]
+
+#Cleaning
+team_ratings$DRtg <- as.numeric(team_ratings$DRtg) #Changing DRtg from character to numeric attribute
+names(team_ratings) <- c("nameTeam","defRate") #renaming columns to match previous table
+
+#Final Defensive rating table
+team_ratings <- tibble(team_ratings)
+team_ratings <- left_join(team_ratings, current_teams[c("nameTeam","slugTeam")], "nameTeam")
+
+#Fixing Clippers Slug
+team_ratings[which(team_ratings$nameTeam == "Los Angeles Clippers"), "slugTeam"] = "LAC"
+```
+
+#Creating list of shots
+Now lets grab all of the shots taken during the 2019-2020 season including the playoffs. We'll also be joining in the defensive rating data and excluding players from teams who did not participate in the bubble.
+
+```{r, message=FALSE, warnings = FALSE}
+shotsData <-  teams_shots(teams = bubble_teams$nameTeam,
+                          seasons = 2020, 
+                          season_types = c("Regular Season", "Playoffs")) %>% #Grabbing data
+  
+  filter(typeAction == "Jump Shot") %>% #Filtering out non-jumpshots
+  
+  select(namePlayer, nameTeam, typeEvent, typeShot, dateGame, slugTeamHome, slugTeamAway,
+         idGame, distanceShot, zoneBasic, isShotMade,
+         locationX, locationY) %>% #Selecting relevant variables
+  
+  mutate(made_shot = 1*(typeEvent=="Made Shot")) %>% #creating indicator for made shots
+  
+  left_join(current_teams[c("nameTeam","slugTeam")], "nameTeam" ) %>% #joining in the shortened team names
+  
+  mutate(home_team = 1*(slugTeam == slugTeamHome)) %>% #creating the hometeam indicator
+  
+  mutate(opp_slug = ifelse(home_team==1, slugTeamAway, slugTeamHome)) %>% #Creating opponent variable
+  
+  left_join(team_ratings[c("slugTeam", "defRate")], by = c("opp_slug" = "slugTeam")) #Adding defensive ratings for opponents
+
+#Reformating the date of the game to be as a datetime 
+shotsData$dateGame <- ymd(shotsData$dateGame)
+
+#Creating the indicator for whether the game was in the bubble or not
+shotsData$bubble <- 1*((shotsData$dateGame > ymd("20200501")) & (shotsData$dateGame < ymd("20201020")))
+
+```
+
+## Saving the dataset
+```{r}
+#Saving the data
+save(shotsData, file = "shot_data.RData")
+```
+
+
+
